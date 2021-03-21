@@ -25,50 +25,56 @@ namespace IngameScript
         // Configuration Parameters
         //
 
-        PIDController.Parameters RotationAquisitonParameters = new PIDController.Parameters()
-        {
-            Kp = 5,
-            Ki = 0,
-            Kd = 0
-        };
-        PIDController.Parameters RotationLockParameters = new PIDController.Parameters()
-        {
-            Kp = 4,
-            Ki = 2,
-            Kd = 0.5
-        };
+        // 60 ticks per second
+        const double TickRate = 60.0;
 
+        // Filter coefficient for acceleration estimator
+        //  - Updated once every 10 ticks, so divide tick rate by 10.
+        readonly float AccelerationFilterCoeff = (float)OnePoleFilterD.LPFCoeff(1.0, TickRate / 10);
+
+        readonly PIDController.Parameters RotationAquisitonParameters = new PIDController.Parameters()
+        {
+            Kp = 10,
+            Ki = 3,
+            Kd = 0.5,
+        };
 
         //
         // Control modules
         //
 
-        WcPbApi api;
-        SituationalAwareness situationalAwareness;
-        DirectionController directionController;
-        TargetTracker targetTracker;
+        readonly WcPbApi api;
+        readonly SituationalAwareness situationalAwareness;
+        readonly HeadingController headingController;
+
+        readonly IMyShipController remoteControlBlock;
+
+        readonly Dictionary<string,DebugPanel> debugPanels;
 
         long currentTime;
 
         public Program()
         {
+            Runtime.UpdateFrequency = UpdateFrequency.None;
             try
             {
                 api = new WcPbApi();
                 api.Activate(Me);
 
-                List<IMyTextPanel> textSurfaces = new List<IMyTextPanel>();
-                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(textSurfaces);
+                debugPanels = new Dictionary<string, DebugPanel>();
+                InitDebugPanels();
+
+                DebugPanel debugLog = DebugPanelByName("log");
+                debugLog.Title = "Debug Log";
 
                 // The remote control block is the forward reference for this grid. I should probably change this to something else....
-                IMyShipController controlBlock = GridTerminalSystem.GetBlockWithName("Remote Control") as IMyRemoteControl;
+                remoteControlBlock = GridTerminalSystem.GetBlockWithName("Remote Control") as IMyRemoteControl;
 
                 // Initialize situational awareness tracker
-                situationalAwareness = new SituationalAwareness(api, Me, new DebugPanel(textSurfaces[0], "Situational Awareness", 26).WriteLine);
+                situationalAwareness = new SituationalAwareness(api, Me, AccelerationFilterCoeff, DebugPanelByName("sitcon"), DebugPanelByName("track"));
 
                 // Initialize 
-                directionController = new DirectionController(GridTerminalSystem, controlBlock, RotationAquisitonParameters, RotationLockParameters, new DebugPanel(textSurfaces[1], "Direction Controller", 26));
-                targetTracker = new TargetTracker(situationalAwareness, directionController, controlBlock, new DebugPanel(textSurfaces[2], "Target Tracker", 26).WriteLine);
+                headingController = new HeadingController(GridTerminalSystem, remoteControlBlock, DebugPanelByName("heading"), debugLog);
 
                 currentTime = 0;
             }
@@ -78,7 +84,26 @@ namespace IngameScript
             }
         }
 
-        void DebugEcho(string message) => Echo(message);
+        DebugPanel DebugPanelByName(string name)
+        {
+            if (debugPanels.ContainsKey(name))
+                return debugPanels[name];
+            else
+                return null;
+        }
+
+        void InitDebugPanels()
+        {
+            List<IMyTextPanel> textPanels = new List<IMyTextPanel>();
+            GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(textPanels);
+            
+            foreach (var textPanel in textPanels)
+            {
+                DebugPanel debugPanel = new DebugPanel(textPanel, 26);
+                string name = textPanel.CustomData.Trim();
+                if (name != "") debugPanels.Add(name, debugPanel);
+            }
+        }
 
         public void Main(string argument, UpdateType updateSource)
         {
@@ -111,6 +136,10 @@ namespace IngameScript
                     Stop();
                     break;
 
+                case "toggleControl":
+                    headingController.ToggleControl();
+                    break;
+
                 case "update1":
                     Update1();
                     break;
@@ -123,28 +152,36 @@ namespace IngameScript
 
         void Begin()
         {
+            // Initialize time and callbacks.
             currentTime = 0;
+            Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10;
+
+            // Start the situational awareness module.
             situationalAwareness.Reset();
             situationalAwareness.UpdateThreatsFromWC(currentTime);
 
+            // Set up targe tracking for experimental purposes
+            Echo("Setting target to first threat.");
             var threat = situationalAwareness.CurrentThreats.First();
-            targetTracker.SetTarget(threat.Key);
+            situationalAwareness.TrackedThreat = threat.Key;
 
-            Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10;
-            targetTracker.Enable = true;
-            directionController.Enable = true;
+            headingController.Track = new TargetHeadingTrack(remoteControlBlock, threat.Value);
+
+            // Turn on the heading controller
+            headingController.Enable = true;
         }
 
         void Stop()
         {
-            targetTracker.Enable = false;
-            directionController.Enable = false;
+            Runtime.UpdateFrequency = UpdateFrequency.None;
+            headingController.Enable = false;
         }
 
         void Update1()
         {
-            targetTracker.Update1();
-            directionController.Update1();
+            MyShipVelocities shipVelocities = remoteControlBlock.GetShipVelocities();
+
+            headingController.Update1(shipVelocities.AngularVelocity);
 
             // Needs to be last thing to happen in Update1.
             currentTime += 1;
@@ -153,7 +190,6 @@ namespace IngameScript
         void Update10()
         {
             situationalAwareness.UpdateThreatsFromWC(currentTime);
-            targetTracker.Update10();
         }
     }
 

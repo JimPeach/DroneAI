@@ -23,20 +23,22 @@ namespace IngameScript
     {
         public class DebugPanel
         {
-            IMyTextSurface panel;
-            string title;
-            int maxLines;
-            List<string> lines;
-            StringBuilder contentBuilder;
+            readonly IMyTextSurface panel;            
+            readonly int maxLines;
+            readonly List<string> lines;
+            readonly StringBuilder contentBuilder;
 
-            public DebugPanel(IMyTextSurface panel_, string title_, int maxLines_)
+            public string Title;
+
+            public DebugPanel(IMyTextSurface panel_, int maxLines_)
             {
                 panel = panel_;
                 contentBuilder = new StringBuilder(2048);
                 maxLines = maxLines_;
-                title = title_;
+                Title = "";
 
                 lines = new List<string>(maxLines);
+                panel.WriteText("");
             }
 
             public void WriteLine(string newLine)
@@ -47,7 +49,7 @@ namespace IngameScript
                 lines.Add(newLine);
 
                 contentBuilder.Clear();
-                contentBuilder.Append(title);
+                contentBuilder.Append(Title);
                 contentBuilder.Append('\n');
                 foreach (var line in lines) 
                 {
