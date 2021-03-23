@@ -30,6 +30,11 @@ namespace IngameScript
 
             public string Title;
 
+            static public string ToString(Vector3D vec, int digits = 3)
+            {
+                return $"{Math.Round(vec.X, digits)}, {Math.Round(vec.Y, digits)}, {Math.Round(vec.Z, digits)}";
+            }
+
             public DebugPanel(IMyTextSurface panel_, int maxLines_)
             {
                 panel = panel_;

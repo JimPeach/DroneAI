@@ -54,7 +54,8 @@
   <Import Project="MDK/MDK.paths.props" Condition="exists('MDK/MDK.paths.props')" />
   <ItemGroup>
     <Compile Include="DebugPanel.cs" />
-    <Compile Include="HeadingController.cs" />
+    <Compile Include="Autopilot.cs" />
+    <Compile Include="NavigationSystems.cs" />
     <Compile Include="MDK\Bootstrapper.cs" />
     <AdditionalFiles Include="MDK\MDK.options.props">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>

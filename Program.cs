@@ -27,25 +27,20 @@ namespace IngameScript
 
         // 60 ticks per second
         const double TickRate = 60.0;
+        const double SpeedCap = 300.0;
 
         // Filter coefficient for acceleration estimator
         //  - Updated once every 10 ticks, so divide tick rate by 10.
         readonly float AccelerationFilterCoeff = (float)OnePoleFilterD.LPFCoeff(1.0, TickRate / 10);
-
-        readonly PIDController.Parameters RotationAquisitonParameters = new PIDController.Parameters()
-        {
-            Kp = 10,
-            Ki = 3,
-            Kd = 0.5,
-        };
 
         //
         // Control modules
         //
 
         readonly WcPbApi api;
+        readonly NavigationSystems navigationSystems;
         readonly SituationalAwareness situationalAwareness;
-        readonly HeadingController headingController;
+        readonly Autopilot motionController;
 
         readonly IMyShipController remoteControlBlock;
 
@@ -70,11 +65,9 @@ namespace IngameScript
                 // The remote control block is the forward reference for this grid. I should probably change this to something else....
                 remoteControlBlock = GridTerminalSystem.GetBlockWithName("Remote Control") as IMyRemoteControl;
 
-                // Initialize situational awareness tracker
                 situationalAwareness = new SituationalAwareness(api, Me, AccelerationFilterCoeff, DebugPanelByName("sitcon"), DebugPanelByName("track"));
-
-                // Initialize 
-                headingController = new HeadingController(GridTerminalSystem, remoteControlBlock, DebugPanelByName("heading"), debugLog);
+                navigationSystems = new NavigationSystems(GridTerminalSystem, remoteControlBlock);
+                motionController = new Autopilot(navigationSystems, DebugPanelByName("heading"), DebugPanelByName("thrust"));
 
                 currentTime = 0;
             }
@@ -136,10 +129,6 @@ namespace IngameScript
                     Stop();
                     break;
 
-                case "toggleControl":
-                    headingController.ToggleControl();
-                    break;
-
                 case "update1":
                     Update1();
                     break;
@@ -153,35 +142,31 @@ namespace IngameScript
         void Begin()
         {
             // Initialize time and callbacks.
-            currentTime = 0;
             Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10;
+            currentTime = 0;
 
             // Start the situational awareness module.
             situationalAwareness.Reset();
             situationalAwareness.UpdateThreatsFromWC(currentTime);
 
-            // Set up targe tracking for experimental purposes
-            Echo("Setting target to first threat.");
             var threat = situationalAwareness.CurrentThreats.First();
             situationalAwareness.TrackedThreat = threat.Key;
 
-            headingController.Track = new TargetHeadingTrack(remoteControlBlock, threat.Value);
+            motionController.Track = new TargetHeadingTrack(remoteControlBlock, threat.Value);
 
             // Turn on the heading controller
-            headingController.Enable = true;
+            navigationSystems.Enable = true;
         }
 
         void Stop()
         {
             Runtime.UpdateFrequency = UpdateFrequency.None;
-            headingController.Enable = false;
+            navigationSystems.Enable = false;
         }
 
         void Update1()
         {
-            MyShipVelocities shipVelocities = remoteControlBlock.GetShipVelocities();
-
-            headingController.Update1(shipVelocities.AngularVelocity);
+            motionController.Update1();
 
             // Needs to be last thing to happen in Update1.
             currentTime += 1;
